@@ -10,8 +10,8 @@ import os
 
 # set up the scraper first
 scraper = LeadsScraper(
-    headers=os.path.join(os.getcwd(), "identities/mike/headers.json"),
-    cookies=os.path.join(os.getcwd(), "identities/mike/cookies.json"),
+    headers=os.path.join(os.getcwd(), "test/identities/mike/headers.json"),
+    cookies=os.path.join(os.getcwd(), "test/identities/mike/cookies.json"),
 )
 
 # set up request queue functionality
@@ -33,7 +33,7 @@ def process_requests():
         # process the request
         # ? for now, our url is fixed
         url = None
-        with open("links/testibio.txt", "r") as f:
+        with open("test/links/testibio.txt", "r") as f:
             url = f.read()
 
         # scrape the url
