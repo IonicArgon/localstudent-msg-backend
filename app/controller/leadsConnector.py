@@ -2,8 +2,12 @@
 import pandas as pd
 from base import Base
 
+# type import
+from requests.models import Response
+
 # temporary imports for testing and stuff
 import os
+import sys
 import json
 
 
@@ -11,16 +15,18 @@ import json
 class LinkedInMemberObjDoesNotExist(Exception):
     pass
 
-
 class LinkedInMemberObjMalformed(Exception):
     pass
 
+class LinkedInProfileObjMalformed(Exception):
+    pass
 
 class LeadsConnector(Base):
     def __init__(self, headers: str = None, cookies: str = None):
         super().__init__(headers=headers, cookies=cookies)
         self.m_filtered_leads = []
         self.m_previous_connections = []
+        self.m_current_profile_urn = None
 
     def get_filtered_leads(self) -> list:
         return self.m_filtered_leads
@@ -98,15 +104,35 @@ class LeadsConnector(Base):
         
         return response.json()
     
-    def connect_to_profile(self, profile_urn, message: str = ""):
+    def get_profile_urn(self, json_data: dict) -> str:
+        elements_first = json_data.get("elements", None)[0]
+
+        if elements_first is None:
+            raise LinkedInProfileObjMalformed(
+                "LinkedIn profile object is malformed! Maybe LinkedIn changed their API?"
+            )
+        
+        # look for a value starting with "urn:li:fsd_profile:" within the json
+        for value in elements_first.values():
+            if isinstance(value, str) and value.startswith("urn:li:fsd_profile:"):
+                self.m_current_profile_urn = value
+                break
+        
+        return self.m_current_profile_urn
+    
+    def connect_to_profile(self, profile_urn, message: str = "") -> Response:
         params = {
-            "action": "verifyQuotaAndCreate",
-            "decorationId": "com.linkedin.voyager.dash.deco.relationships.InvitationCreationResult-3"
+            "action": "verifyQuotaAndCreateV2",
+            "decorationId": "com.linkedin.voyager.dash.deco.relationships.InvitationCreationResultWithInvitee-2"
         }
 
         payload = {
-            "inviteeProfileUrn": profile_urn,
-            "customMessage": message
+            "invitee": {
+                "inviteeUnion": {
+                    "memberProfile": profile_urn
+                }
+            },
+            "customMessage": message,
         }
 
         self.m_session.headers.update({"User-Agent": self.get_user_agent()})
@@ -120,17 +146,10 @@ class LeadsConnector(Base):
             timeout=10
         )
 
-        if response.status_code != 200 or response.status_code != 500:
-            print(f"Failed to connect to {profile_urn} with status code {response.status_code}\n")
-            print("The following is debug info:")
-            print(json.dumps(response.json(), indent=4))
-            print("Response headers:")
-            print(json.dumps(dict(response.headers), indent=4))
-            print("Response cookies:")
-            print(json.dumps(dict(response.cookies), indent=4))
-            return None
+        #! if it fails with a 400 with the code "CANT_RESEND_YET" then we'll need to wait like 3 weeks
+        #todo: add a check for this
         
-        return response.json()
+        return response
 
 ## quick testing
 if __name__ == "__main__":
@@ -153,14 +172,12 @@ if __name__ == "__main__":
     # try to get the profile
     print("getting profile")
     profile = connector.get_profile(connector.get_filtered_leads()[0]["profile_id"])
-    profile_urn = profile.get("elements")[0].get("memberRelationship").get("memberRelationshipUnion").get("noConnection").get("invitationUnion").get("noInvitation").get("inviter")
-    print(profile_urn)
+    profile_urn = connector.get_profile_urn(profile)
+    response_connection = connector.connect_to_profile(profile_urn, message="Hello, I'm Mike Johnson!")
 
-    # lets try to connect
-    message = None
-    with open("test/testMessage.txt", "r", encoding="utf-8") as f:
-        message = f.read()
-
-    print("connecting to profile")
-    response = connector.connect_to_profile(profile_urn, message=message)
-    print(response)
+    # dump whole response (data, headers, cookies, etc.) to file
+    print("writing response to file")
+    with open("test/response.json", "w", encoding="utf-8") as f:
+        json.dump(response_connection.json(), f, indent=4)
+        json.dump(dict(response_connection.headers), f, indent=4)
+        json.dump(dict(response_connection.cookies), f, indent=4)

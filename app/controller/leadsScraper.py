@@ -80,7 +80,7 @@ if __name__ == "__main__":
     )
 
     url = None
-    with open("test/links/testAppleseed.txt", "r") as f:
+    with open("test/links/testViper.txt", "r") as f:
         url = f.read()
 
     print("about to scrape")
