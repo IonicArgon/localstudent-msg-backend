@@ -4,6 +4,7 @@ import time
 import uuid
 from flask import Blueprint, request, jsonify
 from app.controller.leadsScraper import LeadsScraper
+from app.controller.leadsFilterer import LeadsFilterer
 
 # temporary imports to get this working
 import os
@@ -13,6 +14,9 @@ scraper = LeadsScraper(
     headers=os.path.join(os.getcwd(), "test/identities/mike/headers.json"),
     cookies=os.path.join(os.getcwd(), "test/identities/mike/cookies.json"),
 )
+
+# set up the filterer
+filterer = LeadsFilterer()
 
 # set up request queue functionality
 request_queue = queue.Queue()
@@ -52,8 +56,11 @@ def process_requests():
                 print("Scrape is not ready to be used again")
                 time.sleep(1)
 
+        # filter the leads
+        filterer.filter_leads(scraper.get_leads())
+
         # add the processed data to the processed requests queue
-        processed_requests.put((current_request[0], current_request[1], scraper.get_leads()))
+        processed_requests.put((current_request[0], current_request[1], filterer.get_filtered_leads()))
 
         # reset the scraper
         scraper.reset()
