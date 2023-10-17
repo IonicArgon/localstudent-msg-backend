@@ -34,22 +34,28 @@ def process_requests():
 
         # process the request
         leads: list = current_request[2]["leads"]
+        base_message: str = current_request[2]["message"]
+        recruiter_name: str = current_request[2]["recruiter_name"]
         
         # connect to each lead
         for lead in leads:
             lead_id = lead["profile_id"]
-            lead_message = lead["message"]
+            lead_name = lead["name"]
+            lead_message = base_message.replace("{name}", lead_name).replace("{recruiter_name}", recruiter_name)
             
             lead_urn = connector.get_profile_urn(lead_id)
             response = connector.connect_to_profile(lead_urn, message=lead_message)
 
             # add the response to the processed requests
             if current_request[0] not in processed_requests:
-                processed_requests[current_request[0]] = []
+                processed_requests[current_request[0]] = {}
+                processed_requests[current_request[0]]["request_time"] = current_request[1]
+                processed_requests[current_request[0]]["responses"] = []
 
-            processed_requests[current_request[0]].append(
+            processed_requests[current_request[0]]["responses"].append(
                 {
-                    "profile_id": lead_id,
+                    "lead_id": lead_id,
+                    "lead_name": lead_name,
                     "response": response.json(),
                 }
             )
@@ -112,7 +118,7 @@ def get_connect_status(request_id: str):
     for i, key in enumerate(processed_requests.keys()):
         if key == request_id:
             # get the responses stored there
-            responses = processed_requests[key]
+            processed = processed_requests[key]
 
             # remove that entry from the dictionary
             del processed_requests[key]
@@ -122,7 +128,8 @@ def get_connect_status(request_id: str):
                 jsonify(
                     {
                         "request_id": request_id,
-                        "responses": responses,
+                        "request_time": processed["request_time"],
+                        "responses": processed["responses"],
                         "message": "Request has been processed",
                     }
                 ),
