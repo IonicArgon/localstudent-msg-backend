@@ -24,15 +24,6 @@ class LinkedInProfileObjMalformed(Exception):
 class LeadsConnector(Base):
     def __init__(self, headers: str = None, cookies: str = None):
         super().__init__(headers=headers, cookies=cookies)
-        self.m_filtered_leads = []
-        self.m_previous_connections = []
-        self.m_current_profile_urn = None
-
-    def get_filtered_leads(self) -> list:
-        return self.m_filtered_leads
-    
-    def get_previous_connections(self) -> list:
-        return self.m_previous_connections
 
     def get_profile(self, profile_id: str) -> dict:
         params = {
@@ -65,10 +56,12 @@ class LeadsConnector(Base):
         # look for a value starting with "urn:li:fsd_profile:" within the json
         for value in elements_first.values():
             if isinstance(value, str) and value.startswith("urn:li:fsd_profile:"):
-                self.m_current_profile_urn = value
-                break
+                return value
         
-        return self.m_current_profile_urn
+        # if we get here, then we didn't find a value
+        raise LinkedInProfileObjMalformed(
+            "LinkedIn profile object is malformed! Maybe LinkedIn changed their API?"
+        )
     
     def connect_to_profile(self, profile_urn, message: str = "") -> Response:
         params = {
