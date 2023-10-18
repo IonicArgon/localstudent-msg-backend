@@ -7,6 +7,7 @@ from app.controller.leadsConnector import LeadsConnector
 
 # temporary imports to get it working
 import os
+import json
 
 # set up connector
 #! this is not permanent, this is just for testing
@@ -43,7 +44,8 @@ def process_requests():
             lead_name = lead["name"]
             lead_message = base_message.replace("{name}", lead_name).replace("{recruiter_name}", recruiter_name)
             
-            lead_urn = connector.get_profile_urn(lead_id)
+            profile = connector.get_profile(lead_id)
+            lead_urn = connector.get_profile_urn(profile)
             response = connector.connect_to_profile(lead_urn, message=lead_message)
 
             # add the response to the processed requests
@@ -63,16 +65,19 @@ def process_requests():
         # mark the task as done
         request_queue.task_done()
 
+        # reset
+        current_request = None
+
 # start the thread
 thread = threading.Thread(target=process_requests)
 thread.daemon = True
 thread.start()
 
 # create the blueprint
-connect_route = Blueprint("leads_route", __name__)
+connect_route_bp = Blueprint("connect_route", __name__)
 
 # create the route
-@connect_route.route("/connect", methods=["POST"])
+@connect_route_bp.route("/connect", methods=["POST"])
 def connect_to_profiles():
     # generate uuid
     request_id = str(uuid.uuid4())
@@ -112,7 +117,7 @@ def connect_to_profiles():
     )
 
 # create the route to get processed requests
-@connect_route.route("/connect/<request_id>", methods=["GET"])
+@connect_route_bp.route("/connect/<request_id>", methods=["GET"])
 def get_connect_status(request_id: str):
     # check if the request has been processed
     for i, key in enumerate(processed_requests.keys()):

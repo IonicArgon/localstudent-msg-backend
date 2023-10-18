@@ -1,6 +1,5 @@
 # imports up here
-import pandas as pd
-from base import Base
+from app.controller.base import Base
 
 # type import
 from requests.models import Response

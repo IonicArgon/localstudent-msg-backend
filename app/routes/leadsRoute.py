@@ -61,7 +61,7 @@ def process_requests():
 
         # add the processed data to the processed requests queue
         if current_request[0] not in processed_requests:
-            process_requests[current_request[0]] = filterer.get_filtered_leads()
+            processed_requests[current_request[0]] = filterer.get_filtered_leads()
 
         # reset the scraper
         scraper.reset()

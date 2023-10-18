@@ -1,4 +1,4 @@
-from base import Base
+from app.controller.base import Base
 
 # temporary imports until i figure out how im going to store identities
 import os
