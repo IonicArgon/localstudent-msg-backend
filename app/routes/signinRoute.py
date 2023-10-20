@@ -50,19 +50,24 @@ def process_requests():
             event_2fa.wait()
 
         # wait for the request to finish
-        signin_scraper.join()
+        status = signin_scraper.join()
 
         # get the request df
         request_df = signin_scraper.get_request_df()
         request_df = request_df.to_dict(orient="records")
 
-        # add the request to the processed requests
         if current_request[0] not in processed_requests:
             processed_requests[current_request[0]] = {}
+
+        if status == 0:
             processed_requests[current_request[0]]["request_time"] = current_request[1]
             processed_requests[current_request[0]]["request_df"] = request_df
+        elif status == -1:
+            processed_requests[current_request[0]]["request_time"] = current_request[1]
+            processed_requests[current_request[0]]["error"] = "Scraper met a CAPTCHA"
 
         request_queue.task_done()
+        event_2fa.clear()
         current_request = None
 
 
@@ -134,6 +139,18 @@ def get_signin_status(request_id: str):
             if key == request_id:
                 processed = processed_requests[key]
                 del processed_requests[key]
+
+                if processed["error"] is not None:
+                    return (
+                        jsonify(
+                            {
+                                "request_id": request_id,
+                                "request_time": processed["request_time"],
+                                "error": processed["error"],
+                            }
+                        ),
+                        500,
+                    )
 
                 return (
                     jsonify(

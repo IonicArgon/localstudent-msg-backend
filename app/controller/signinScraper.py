@@ -3,6 +3,7 @@ import random
 import threading
 import pandas as pd
 from playwright.sync_api import sync_playwright
+from playwright_stealth.stealth import stealth_sync
 from app.controller.base import Base
 
 # type imports
@@ -43,6 +44,7 @@ class SigninScraper(Base):
         self.m_verification_code = None
         self.m_event = event
         self.m_waiting_for_2fa = False
+        self.m_status = None
 
         # playwright stuff
         self.m_browser = None
@@ -94,12 +96,13 @@ class SigninScraper(Base):
 
     def _scrape(self, email: str, password: str) -> None:
         with sync_playwright() as p:
-            self.m_browser: Browser = p.chromium.launch(headless=False)
+            self.m_browser: Browser = p.chromium.launch()
             self.m_context: BrowserContext = self.m_browser.new_context(
                 user_agent=self.get_user_agent(),
                 geolocation=self._get_random_geo_location(),
             )
             self.m_page: Page = self.m_context.new_page()
+            stealth_sync(self.m_page)
 
             # setup request interception
             self.m_page.on("request", self._intercept_request)
@@ -109,18 +112,26 @@ class SigninScraper(Base):
             self.m_page.fill("#password", password)
             self.m_page.click("button[type=submit]")
 
-            if "checkpoint" in self.m_page.url:
-                print(f"{SigninScraper.__name__}: Waiting for 2FA code...")
-                self.m_waiting_for_2fa = True
-                self.m_event.wait()
+            while True:
+                if "checkpoint" in self.m_page.url and self.m_page.get_by_text("Let's do a quick security check"):
+                    self.m_status = -1
+                    return
+                elif "checkpoint" in self.m_page.url and self.m_page.get_by_text("Enter"):
+                    print(f"{SigninScraper.__name__}: Waiting for 2FA code...")
+                    self.m_waiting_for_2fa = True
+                    self.m_event.wait()
 
-                self.m_page.fill("[id*='verification_pin']", self.m_verification_code)
-                self.m_page.click("button[type=submit]")
+                    self.m_page.fill("[id*='verification_pin']", self.m_verification_code)
+                    self.m_page.click("button[type=submit]")
 
-                if "checkpoint" in self.m_page.url:
-                    raise LinkedInSignInFailed("LinkedIn sign in failed.")
-                
-                self.m_waiting_for_2fa = False
+                    if "checkpoint" in self.m_page.url:
+                        print(f"{SigninScraper.__name__}: 2FA code was incorrect.")
+                        self.m_event.clear()
+                        self.m_verification_code = None
+                        continue
+                    else:
+                        self.m_waiting_for_2fa = False
+                        break
 
             self.m_page.wait_for_load_state("networkidle")
             self.m_page.wait_for_timeout(self.m_dashboard_time)
@@ -129,6 +140,8 @@ class SigninScraper(Base):
         # check if the df is empty
         if self.m_request_df.empty:
             raise VoyagerRequestNotFound("No voyager requests were found.")
+        
+        self.m_status = 0
 
     # public
 
@@ -153,8 +166,9 @@ class SigninScraper(Base):
         self.m_thread = threading.Thread(target=self._scrape, args=(email, password))
         self.m_thread.start()
 
-    def join(self) -> None:
+    def join(self) -> int:
         self.m_thread.join()
+        return self.m_status
 
 
 ## testing
