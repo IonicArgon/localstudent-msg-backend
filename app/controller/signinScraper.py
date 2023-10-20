@@ -42,6 +42,7 @@ class SigninScraper(Base):
         self.m_request_df = pd.DataFrame(columns=["url", "method", "headers", "body"])
         self.m_verification_code = None
         self.m_event = event
+        self.m_waiting_for_2fa = False
 
         # playwright stuff
         self.m_browser = None
@@ -111,6 +112,7 @@ class SigninScraper(Base):
 
             if "checkpoint" in self.m_page.url:
                 print(f"{SigninScraper.__name__}: Waiting for 2FA code...")
+                self.m_waiting_for_2fa = True
                 self.m_event.wait()
 
                 self.m_page.fill("[id*='verification_pin']", self.m_verification_code)
@@ -118,6 +120,8 @@ class SigninScraper(Base):
 
                 if "checkpoint" in self.m_page.url:
                     raise LinkedInSignInFailed("LinkedIn sign in failed.")
+                
+                self.m_waiting_for_2fa = False
 
             self.m_page.wait_for_load_state("networkidle")
             self.m_page.wait_for_timeout(self.m_dashboard_time)
@@ -135,6 +139,9 @@ class SigninScraper(Base):
     def get_verification_code(self) -> str:
         return self.m_verification_code
 
+    def is_waiting_for_2fa(self) -> bool:
+        return self.m_waiting_for_2fa
+
     def set_verification_code(self, code: str) -> None:
         self.m_verification_code = code
 
@@ -146,42 +153,45 @@ class SigninScraper(Base):
     def scrape(self, email: str, password: str) -> None:
         self.m_thread = threading.Thread(target=self._scrape, args=(email, password))
         self.m_thread.start()
+
+    def join(self) -> None:
         self.m_thread.join()
 
 
 ## testing
-if __name__ == "__main__":
-    load_dotenv()
+# if __name__ == "__main__":
+#     load_dotenv()
 
-    # get the email and password from the environment
-    EMAIL = os.getenv("TEST_EMAIL")
-    PASS = os.getenv("TEST_PASS")
+#     # get the email and password from the environment
+#     EMAIL = os.getenv("TEST_EMAIL")
+#     PASS = os.getenv("TEST_PASS")
 
-    # 2fa events
-    event = Event()
+#     # 2fa events
+#     event = Event()
 
-    # create a scraper
-    scraper = SigninScraper(
-        headers=os.path.join(os.getcwd(), "test/identities/mike/headers.json"),
-        cookies=os.path.join(os.getcwd(), "test/identities/mike/cookies.json"),
-        event=event,
-        dashboard_time=20,
-    )
+#     # create a scraper
+#     scraper = SigninScraper(
+#         headers=os.path.join(os.getcwd(), "test/identities/mike/headers.json"),
+#         cookies=os.path.join(os.getcwd(), "test/identities/mike/cookies.json"),
+#         event=event,
+#         dashboard_time=20,
+#     )
 
-    # set up thread stuff
-    def code_input_thread(event: Event) -> None:
-        verification_code = input("Enter the 2FA code: ")
-        scraper.set_verification_code(verification_code)
-        event.set()
+#     # set up thread stuff
+#     def code_input_thread(event: Event) -> None:
+#         verification_code = input("Enter the 2FA code: ")
+#         scraper.set_verification_code(verification_code)
+#         event.set()
 
-    code_input_thread = threading.Thread(target=code_input_thread, args=(event,))
-    code_input_thread.start()
-    scraper.scrape(EMAIL, PASS)
-    code_input_thread.join()
+#     code_input_thread = threading.Thread(target=code_input_thread, args=(event,))
+#     code_input_thread.start()
+#     scraper.scrape(EMAIL, PASS)
+#     print("test to see if this method is blocking")
+#     code_input_thread.join()
 
-    request_file_name = "test/request_data.csv"
-    i = 1
-    while os.path.exists(request_file_name):
-        request_file_name = f"test/request_data_{i}.csv"
-        i += 1
-    scraper.get_request_df().to_csv(request_file_name, index=False)
+#     request_file_name = "test/request_data.csv"
+#     i = 1
+#     while os.path.exists(request_file_name):
+#         request_file_name = f"test/request_data_{i}.csv"
+#         i += 1
+#     scraper.get_request_df().to_csv(request_file_name, index=False)
