@@ -1,6 +1,13 @@
 # imports
+import random
+import threading
+import pandas as pd
 from playwright.sync_api import sync_playwright
 from base import Base
+
+# type imports
+from playwright.sync_api import Page, BrowserContext, Browser, Request, Response
+from threading import Event
 
 # temporary imports for testing and stuff
 import os
@@ -10,150 +17,171 @@ from dotenv import load_dotenv
 
 
 # exceptions that i can think of
-class LinkedIn2FARequired(Exception):
-    pass
-
 class LinkedInSignInFailed(Exception):
     pass
 
-class VoyagerSearchDashSearchHomeRequestNotFound(Exception):
+
+class VoyagerRequestNotFound(Exception):
     pass
+
+
+class NoEventProvided(Exception):
+    pass
+
 
 # class
 class SigninScraper(Base):
-    def __init__(self, headers: str = None, cookies: str = None):
+    def __init__(
+        self,
+        headers: str = None,
+        cookies: str = None,
+        event: Event = None,
+        dashboard_time: int = 15,  # this is in seconds
+    ):
         super().__init__(headers=headers, cookies=cookies)
+        self.m_request_df = pd.DataFrame(columns=["url", "method", "headers", "body"])
+        self.m_verification_code = None
+        self.m_event = event
+
+        # playwright stuff
         self.m_browser = None
         self.m_context = None
         self.m_page = None
+        self.m_dashboard_time = 1000 * dashboard_time
 
-        self.m_cookies = None
-        self.m_headers = None
+        # threading stuff
+        self.m_thread = None
 
-        self.m_2fa = None
-
-        self.m_request_events = []
+        if self.m_event is None:
+            raise NoEventProvided("No event was provided to the SigninScraper class.")
 
     def __del__(self):
         if self.m_browser is not None:
             self.m_browser.close()
 
-    def get_cookies(self) -> str:
-        return self.m_cookies
-    
-    def get_headers(self) -> str:
-        return self.m_headers
-    
-    def set_2fa(self, code: str):
-        self.m_2fa = code
-    
-    # currently i think i'll just return an int for the status code
-    # we're gonna have to do this async because of 2FA
-    def scrape_requests(self, email: str, password: str) -> None:
+    # private
+
+    def _get_random_geo_location(self) -> dict:
+        return {
+            "latitude": random.uniform(-90, 90),
+            "longitude": random.uniform(-180, 180),
+        }
+
+    def _intercept_request(self, request: Request) -> None:
+        if "voyager" not in request.url.lower() or "csrf-token" not in request.headers:
+            return
+
+        print(f"Intercepted request to: {request.url} of type: {request.method}")
+
+        # add the request to the dataframe
+        self.m_request_df = pd.concat(
+            [
+                self.m_request_df,
+                pd.DataFrame(
+                    data=[
+                        [
+                            request.url,
+                            request.method,
+                            request.all_headers(),
+                            request.post_data,
+                        ]
+                    ],
+                    columns=["url", "method", "headers", "body"],
+                ),
+            ]
+        )
+
+    def _scrape(self, email: str, password: str) -> None:
         with sync_playwright() as p:
-            self.m_browser = p.chromium.launch()
-            self.m_context = self.m_browser.new_context(
-                user_agent=self.get_user_agent()
+            # todo: remember to make this headless
+            self.m_browser: Browser = p.chromium.launch(headless=False)
+            self.m_context: BrowserContext = self.m_browser.new_context(
+                user_agent=self.get_user_agent(),
+                geolocation=self._get_random_geo_location(),
             )
-            self.m_page = self.m_context.new_page()
-            print("Created page")
+            self.m_page: Page = self.m_context.new_page()
 
-            # go to the linkedin login page
+            # setup request interception
+            self.m_page.on("request", self._intercept_request)
+
             self.m_page.goto("https://www.linkedin.com/login")
-
-            # fill in the email and password fields
             self.m_page.fill("#username", email)
             self.m_page.fill("#password", password)
-            print("Filled in email and password")
-
-            # click the sign in button
             self.m_page.click("button[type=submit]")
-            self.m_page.wait_for_load_state("networkidle")
 
-            # check if we're on the 2FA page
-            if "https://www.linkedin.com/checkpoint/" in self.m_page.url:
-                # we're on the 2FA page, wait for a code to be entered
-                print("Waiting for 2FA code...")
-                while self.m_2fa is None:
-                    pass
+            if "checkpoint" in self.m_page.url:
+                print(f"{SigninScraper.__name__}: Waiting for 2FA code...")
+                self.m_event.wait()
 
-                # fill in the 2FA code
-                self.m_page.fill("#input__email_verification_pin", self.m_2fa)
+                self.m_page.fill("[id*='verification_pin']", self.m_verification_code)
                 self.m_page.click("button[type=submit]")
-                print("Filled in 2FA code")
 
-                # check if we're on the 2FA page again
-                if "https://www.linkedin.com/checkpoint/" in self.m_page.url:
-                    # we're still on the 2FA page, so the code was wrong
-                    raise LinkedIn2FARequired("2FA code was incorrect!")
-                
-            # check if we're not on the home page and if so, then we failed to sign in
-            if not "https://www.linkedin.com/feed/" in self.m_page.url:
-                raise LinkedInSignInFailed("Failed to sign in!")
-            
-            # first we need to subscribe to all request events
-            self.m_page.on("request", lambda request: self.m_request_events.append(request))
-            print("Subscribed to request events")
+                if "checkpoint" in self.m_page.url:
+                    raise LinkedInSignInFailed("LinkedIn sign in failed.")
 
-            # now we need to search something so we can find VoyagerSearchDashHome
-            self.m_page.fill("input[aria-label='Search']", "test")
-            self.m_page.press("input[aria-label='Search']", "Enter")
-            print("Searched for test")
-
-            # we'll find the cookies and headers in another function
-            self.m_page.close()
-            self.m_context.close()
+            self.m_page.wait_for_load_state("networkidle")
+            self.m_page.wait_for_timeout(self.m_dashboard_time)
             self.m_browser.close()
-            print("Closed page")
-    
-    def process_requests(self) -> None:
-        # look for the VoyagerSearchDashHome request
-        voyagerRequest = None
-        for request in self.m_request_events:
-            if "voyagerSearchDash" in str(request.url):
-                voyagerRequest = request
-                break
 
-        # if we didn't find the request, then we failed to scrape the requests
-        if voyagerRequest is None:
-            raise VoyagerSearchDashSearchHomeRequestNotFound("Failed to find VoyagerSearchDash request!")
-        
-        # get our cookies and headers from the request
-        self.m_cookies = voyagerRequest.headers.get("cookie", None)
-        self.m_headers = voyagerRequest.headers.get("headers", None)
+        # check if the df is empty
+        if self.m_request_df.empty:
+            raise VoyagerRequestNotFound("No voyager requests were found.")
 
-        # if we didn't get the cookies or headers, then we failed to scrape the requests
-        if self.m_cookies is None or self.m_headers is None:
-            raise VoyagerSearchDashSearchHomeRequestNotFound("Failed to find VoyagerSearchDash request!")
-        
+    # public
 
-## quick testing
+    def get_request_df(self) -> pd.DataFrame:
+        return self.m_request_df
+
+    def get_verification_code(self) -> str:
+        return self.m_verification_code
+
+    def set_verification_code(self, code: str) -> None:
+        self.m_verification_code = code
+
+    def reset(self):
+        self.m_request_df = pd.DataFrame(columns=["url", "method", "headers", "body"])
+        self.m_response_df = pd.DataFrame(columns=["url", "status", "headers", "body"])
+        self.m_verification_code = None
+
+    def scrape(self, email: str, password: str) -> None:
+        self.m_thread = threading.Thread(target=self._scrape, args=(email, password))
+        self.m_thread.start()
+        self.m_thread.join()
+
+
+## testing
 if __name__ == "__main__":
     load_dotenv()
 
-    email = os.getenv("TEST_EMAIL")
-    password = os.getenv("TEST_PASS")
+    # get the email and password from the environment
+    EMAIL = os.getenv("TEST_EMAIL")
+    PASS = os.getenv("TEST_PASS")
 
+    # 2fa events
+    event = Event()
+
+    # create a scraper
     scraper = SigninScraper(
         headers=os.path.join(os.getcwd(), "test/identities/mike/headers.json"),
         cookies=os.path.join(os.getcwd(), "test/identities/mike/cookies.json"),
+        event=event,
+        dashboard_time=20,
     )
 
-    # # we need to run this in a thread because we need to wait for the 2FA code to be entered
-    # # we'll join the thread after we pass the 2FA code
-    # thread = threading.Thread(target=scraper.scrape_requests, args=(email, password))
-    # thread.start()
+    # set up thread stuff
+    def code_input_thread(event: Event) -> None:
+        verification_code = input("Enter the 2FA code: ")
+        scraper.set_verification_code(verification_code)
+        event.set()
 
-    # # wait for the 2FA code to be entered
-    # twofa = input("Enter 2FA code: ")
-    # scraper.set_2fa(twofa)
+    code_input_thread = threading.Thread(target=code_input_thread, args=(event,))
+    code_input_thread.start()
+    scraper.scrape(EMAIL, PASS)
+    code_input_thread.join()
 
-    scraper.set_2fa("123456")
-    scraper.scrape_requests(email, password)
-
-    # process the requests
-    scraper.process_requests()
-
-    # print the cookies and headers
-    print(scraper.get_cookies())
-    print(scraper.get_headers())
+    request_file_name = "test/request_data.csv"
+    i = 1
+    while os.path.exists(request_file_name):
+        request_file_name = f"test/request_data_{i}.csv"
+        i += 1
+    scraper.get_request_df().to_csv(request_file_name, index=False)
