@@ -24,6 +24,7 @@ signin_scraper = SigninScraper(
     headers=os.path.join(os.getcwd(), "test/identities/mike/headers.json"),
     cookies=os.path.join(os.getcwd(), "test/identities/mike/cookies.json"),
     event=event_2fa,
+    dashboard_time=5
 )
 
 
@@ -34,8 +35,8 @@ def process_requests():
     while True:
         current_request = request_queue.get()
 
-        email: str = current_request[2]["email"]
-        password: str = current_request[2]["password"]
+        email: str = current_request[2]["credentials"]["email"]
+        password: str = current_request[2]["credentials"]["password"]
 
         signin_scraper.reset()
         signin_scraper.scrape(email, password)
@@ -47,6 +48,9 @@ def process_requests():
         if signin_scraper.is_waiting_for_2fa():
             current_request[3]["status"] = "2fa_required"
             event_2fa.wait()
+
+        # wait for the request to finish
+        signin_scraper.join()
 
         # get the request df
         request_df = signin_scraper.get_request_df()
@@ -68,10 +72,10 @@ thread.daemon = True
 thread.start()
 
 # create the blueprint
-signin_route = Blueprint("signin_route", __name__)
+signin_route_bp = Blueprint("signin_route", __name__)
 
 # define the routes
-@signin_route.route("/signin", methods=["POST"])
+@signin_route_bp.route("/signin", methods=["POST"])
 def signin():
     request_id = str(uuid.uuid4())
     request_time = time.time()
@@ -122,11 +126,11 @@ def signin():
         202,
     )
 
-@signin_route.route("/signin/<request_id>", methods=["GET", "POST"])
+@signin_route_bp.route("/signin/<request_id>", methods=["GET", "POST"])
 def get_signin_status(request_id: str):
     if request.method == "GET":
         # check if the request has been processed
-        for i, key in enumerate(process_requests.keys()):
+        for i, key in enumerate(processed_requests.keys()):
             if key == request_id:
                 processed = processed_requests[key]
                 del processed_requests[key]
@@ -187,7 +191,7 @@ def get_signin_status(request_id: str):
             jsonify(
                 {
                     "request_id": request_id,
-                    "message": "Request does not exist",
+                    "message": "Request not found",
                 }
             ),
             404,
@@ -208,6 +212,7 @@ def get_signin_status(request_id: str):
             )
         
         signin_scraper.set_verification_code(request_data["code"])
+        current_request[3]["status"] = "processing"
         event_2fa.set()
 
         return (

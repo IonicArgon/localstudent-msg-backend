@@ -3,7 +3,7 @@ import random
 import threading
 import pandas as pd
 from playwright.sync_api import sync_playwright
-from base import Base
+from app.controller.base import Base
 
 # type imports
 from playwright.sync_api import Page, BrowserContext, Browser, Request, Response
@@ -94,7 +94,6 @@ class SigninScraper(Base):
 
     def _scrape(self, email: str, password: str) -> None:
         with sync_playwright() as p:
-            # todo: remember to make this headless
             self.m_browser: Browser = p.chromium.launch(headless=False)
             self.m_context: BrowserContext = self.m_browser.new_context(
                 user_agent=self.get_user_agent(),
