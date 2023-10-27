@@ -11,7 +11,11 @@ from requests.models import Response
 # ? scraper goes here
 # ? url generator goes here
 # ? connector goes here
-# ? database access goes here
+
+from app.controller.databaseAdmin import DatabaseAdmin
+from app.schema.identitySchema import IdentitySchema
+from app.schema.leadSchema import LeadSchema
+from app.schema.setupSchema import SetupSchema
 
 
 # typing
@@ -22,15 +26,17 @@ class JobTypes(Enum):
     DATABASE = 4
     SETTING = 5
 
+
 class DatabaseOperationTypes(Enum):
     ADD_CONTACTED_LEADS = 1
-    ADD_SETUPS = 2
+    ADD_SETUP = 2
     GET_CONTACTED_LEADS = 3
-    GET_SETUPS = 4
+    GET_SETUP = 4
     REMOVE_CONTACTED_LEADS = 5
-    REMOVE_SETUPS = 6
+    REMOVE_SETUP = 6
     UPDATE_CONTACTED_LEADS = 7
-    UPDATE_SETUPS = 8
+    UPDATE_SETUP = 8
+
 
 class Job(TypedDict):
     job_type: JobTypes
@@ -60,6 +66,9 @@ class JobScheduler:
         self.m_job_queue = queue.Queue()
         self.m_current_job = None
 
+        # processed jobs
+        self.m_processed_jobs = {}
+
         # threading related
         self.m_job_thread = None
         self.m_job_thread_running = False
@@ -67,7 +76,9 @@ class JobScheduler:
         self.m_job_scheduling_thread_running = False
 
         # database access
-        self.m_database_access = None  # todo: add this
+        self.m_database_access = DatabaseAdmin(
+            ".environment/linkedin-automation-401619-5d531a7232e5.json"
+        )
 
         # filterer
         self.m_filterer = None  # todo: add this
@@ -124,9 +135,7 @@ class JobScheduler:
     def _job_connect(self):
         leads: list[dict] = self.m_current_job["job_data"]["leads"]
         message: str = self.m_current_job["job_data"]["passthrough"]["message"]
-        recruiter: dict = self.m_current_job["job_data"]["passthrough"][
-            "recruiter"
-        ]
+        recruiter: dict = self.m_current_job["job_data"]["passthrough"]["recruiter"]
 
         successful_leads = []
         unsuccessful_leads = []
@@ -159,29 +168,43 @@ class JobScheduler:
                 unsuccessful_leads.append(lead)
 
         # successful leads will be added to the database
+        successful_leads_schema = []
+        for lead in successful_leads:
+            successful_leads_schema.append(
+                LeadSchema(
+                    first_name=lead["first_name"],
+                    last_name=lead["last_name"],
+                    profile_id=lead["profile_id"],
+                )
+            )
+
         self.m_job_queue.put(
             {
                 "job_type": JobTypes.DATABASE,
                 "job_data": {
-                    "leads": successful_leads,
+                    "leads": successful_leads_schema,
                     "operation_type": DatabaseOperationTypes.ADD_CONTACTED_LEADS,
                 },
             }
         )
 
         # unsuccessful leads still within the retry limit will be added back to the queue
-        self.m_job_queue.put(
-            {
-                "job_type": JobTypes.CONNECT,
-                "job_data": {
-                    "leads": unsuccessful_leads,
-                    "passthrough": {
-                        "message": message,
-                        "recruiter": recruiter,
+        if unsuccessful_leads:
+            self.m_job_queue.put(
+                {
+                    "job_type": JobTypes.CONNECT,
+                    "job_data": {
+                        "leads": unsuccessful_leads,
+                        "passthrough": {
+                            "message": message,
+                            "recruiter": recruiter,
+                        },
                     },
-                },
-            }
-        )
+                }
+            )
+
+        # add to the processed jobs
+
 
     def _job_scrape(self):
         keywords = self.m_current_job["job_data"]["keywords"]
@@ -201,12 +224,8 @@ class JobScheduler:
         job_data = {
             "leads": None,
             "passthrough": {
-                "message": self.m_current_job["job_data"]["passthrough"][
-                    "message"
-                ],
-                "recruiter": self.m_current_job["job_data"]["passthrough"][
-                    "recruiter"
-                ],
+                "message": self.m_current_job["job_data"]["passthrough"]["message"],
+                "recruiter": self.m_current_job["job_data"]["passthrough"]["recruiter"],
             },
         }
         job_data["leads"] = self.m_scraper.get_leads()
@@ -234,12 +253,8 @@ class JobScheduler:
         job_data = {
             "leads": None,
             "passthrough": {
-                "message": self.m_current_job["job_data"]["passthrough"][
-                    "message"
-                ],
-                "recruiter": self.m_current_job["job_data"]["passthrough"][
-                    "recruiter"
-                ],
+                "message": self.m_current_job["job_data"]["passthrough"]["message"],
+                "recruiter": self.m_current_job["job_data"]["passthrough"]["recruiter"],
             },
         }
         lead_data = []
@@ -260,11 +275,25 @@ class JobScheduler:
         )
 
     def _job_database(self):
-        pass
+        operation_type = self.m_current_job["job_data"]["operation_type"]
+
+        if operation_type == DatabaseOperationTypes.ADD_CONTACTED_LEADS:
+            leads = self.m_current_job["job_data"]["leads"]
+            self.m_database_access.add_contacted_leads(leads)
+        elif operation_type == DatabaseOperationTypes.ADD_SETUP:
+            setup = self.m_current_job["job_data"]["setup"]
+            self.m_database_access.add_setup(setup)
+        elif operation_type == DatabaseOperationTypes.GET_CONTACTED_LEADS:
+            leads = self.m_database_access.get_contacted_leads()
+            return leads
 
     def _job_setting(self):
-        job_schedule_interval = self.m_current_job["job_data"]["settings"]["job_scheduling_interval"]
-        connection_retries = self.m_current_job["job_data"]["settings"]["connection_retries"]
+        job_schedule_interval = self.m_current_job["job_data"]["settings"][
+            "job_scheduling_interval"
+        ]
+        connection_retries = self.m_current_job["job_data"]["settings"][
+            "connection_retries"
+        ]
 
         # update
         self.m_job_scheduling_interval = job_schedule_interval
@@ -313,17 +342,24 @@ class JobScheduler:
                 # schedule the jobs
                 for setup in setups:
                     job_data = {
-                        "keywords": setup["keywords"],
-                        "per_page": setup["per_page"],
-                        "max_candidates": setup["max_candidates"],
+                        "keywords": setup.get_keywords(),
+                        "per_page": setup.get_candidates_per_page(),
+                        "max_candidates": setup.get_max_candidates(),
                         "passthrough": {
-                            "message": setup["message"],
-                            "recruiter": setup["recruiter"],
+                            "message": setup.get_base_message(),
+                            "recruiter": {
+                                "first_name": setup.get_recruiter_first_name(),
+                                "last_name": setup.get_recruiter_last_name(),
+                            }
                         },
                     }
 
                     self.m_job_queue.put(
-                        {"job_type": JobTypes.SCRAPE, "job_data": job_data}
+                        {
+                            "job_id": f"auto_schedule_{uuid.uuid4()}",
+                            "job_type": JobTypes.SCRAPE,
+                            "job_data": job_data,
+                        }
                     )
 
                 # update the last scheduling date
