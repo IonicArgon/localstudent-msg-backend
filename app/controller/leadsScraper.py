@@ -73,19 +73,19 @@ class LeadsScraper(Base):
 
 
 ## temporary testing
-if __name__ == "__main__":
-    fetcher = LeadsScraper(
-        headers=os.path.join(os.getcwd(), "test/identities/mike/headers.json"),
-        cookies=os.path.join(os.getcwd(), "test/identities/mike/cookies.json"),
-    )
+# if __name__ == "__main__":
+#     fetcher = LeadsScraper(
+#         headers=os.path.join(os.getcwd(), "test/identities/mike/headers.json"),
+#         cookies=os.path.join(os.getcwd(), "test/identities/mike/cookies.json"),
+#     )
 
-    url = None
-    with open("test/links/testViper.txt", "r") as f:
-        url = f.read()
+#     url = None
+#     with open("test/links/testViper.txt", "r") as f:
+#         url = f.read()
 
-    print("about to scrape")
-    fetcher.scrape(url, can_count=25, can_end=2000)
+#     print("about to scrape")
+#     fetcher.scrape(url, can_count=25, can_end=2000)
 
-    print("scraping complete, writing to file")
-    with open("test/leads.json", "w") as f:
-        json.dump(fetcher.get_leads(), f, indent=4)
+#     print("scraping complete, writing to file")
+#     with open("test/leads.json", "w") as f:
+#         json.dump(fetcher.get_leads(), f, indent=4)

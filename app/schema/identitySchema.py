@@ -51,7 +51,7 @@ class IdentitySchema:
                     f"Missing required header {member[2:]}"
                 )
 
-    def _parse_cookie(self, cookie: str):
+    def _parse_cookie(self, cookie: str) -> dict:
         # if cookie is empty, return empty dict
         if not cookie:
             return {}
@@ -65,10 +65,10 @@ class IdentitySchema:
             cookie_dict[key.strip()] = value
         return cookie_dict
     
-    def json_cookie(self):
+    def json_cookie(self) -> dict:
         return self.m_cookie_dict
     
-    def json(self):
+    def json(self) -> dict:
         return {
             "authority": self.m_authority,
             "accept": self.m_accept,
@@ -89,3 +89,4 @@ class IdentitySchema:
             "x-li-track": self.m_x_li_track,
             "x-restli-protocol-version": self.m_x_restli_protocol_version,
         }
+    

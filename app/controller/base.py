@@ -1,15 +1,12 @@
 import requests
 import random as r
 
-# temporary imports until i figure out the cloud storage stuff
-import json
-
 # exceptions
 class InvalidCredentials(Exception):
     pass
 
 class Base:
-    def __init__(self, headers: str = None, cookies: str = None):
+    def __init__(self, headers: dict = None, cookies: dict = None):
         self.m_headers = None
         self.m_cookies = None
         self.m_session = requests.Session()
@@ -24,14 +21,12 @@ class Base:
         ]
 
         if headers is not None:
-            with open(headers, "r", encoding="utf-8") as f:
-                self.m_headers = json.load(f)
+            self.m_headers = headers
         else:
             raise InvalidCredentials("No headers provided")
 
         if cookies is not None:
-            with open(cookies, "r", encoding="utf-8") as f:
-                self.m_cookies = json.load(f)
+            self.m_cookies = cookies
         else:
             raise InvalidCredentials("No cookies provided")
         
