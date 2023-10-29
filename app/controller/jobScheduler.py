@@ -151,8 +151,8 @@ class JobScheduler:
             lead_first_name: str = lead["first_name"]
             recruiter_first_name: str = recruiter["first_name"]
             formatted_message: str = message.format(
-                lead_first_name=lead_first_name,
-                recruiter_first_name=recruiter_first_name,
+                lead=lead_first_name,
+                recruiter=recruiter_first_name,
             )
 
             profile = self.m_connector.get_profile(lead["profile_id"])
@@ -161,7 +161,7 @@ class JobScheduler:
                 profile_urn, message=formatted_message
             )
 
-            if response.status_code == 200:
+            if response.status_code == 200 or response.status_code == 500:
                 successful_leads.append(lead)
             else:
                 lead["retry_count"] += 1
@@ -180,6 +180,7 @@ class JobScheduler:
 
         self.m_job_queue.put(
             {
+                "job_id": self.m_current_job["job_id"],
                 "job_type": JobTypes.DATABASE,
                 "job_data": {
                     "leads": successful_leads_schema,
@@ -205,7 +206,6 @@ class JobScheduler:
 
         # add to the processed jobs
 
-
     def _job_scrape(self):
         keywords = self.m_current_job["job_data"]["keywords"]
         per_page = self.m_current_job["job_data"]["per_page"]
@@ -226,12 +226,14 @@ class JobScheduler:
             "passthrough": {
                 "message": self.m_current_job["job_data"]["passthrough"]["message"],
                 "recruiter": self.m_current_job["job_data"]["passthrough"]["recruiter"],
+                "identity_id": self.m_current_job["job_data"]["passthrough"]["identity_id"],
             },
         }
         job_data["leads"] = self.m_scraper.get_leads()
 
         self.m_job_queue.put(
             {
+                "job_id": self.m_current_job["job_id"],
                 "job_type": JobTypes.FILTER,
                 "job_data": job_data,
             }
@@ -255,6 +257,7 @@ class JobScheduler:
             "passthrough": {
                 "message": self.m_current_job["job_data"]["passthrough"]["message"],
                 "recruiter": self.m_current_job["job_data"]["passthrough"]["recruiter"],
+                "identity_id": self.m_current_job["job_data"]["passthrough"]["identity_id"],
             },
         }
         lead_data = []
@@ -269,6 +272,7 @@ class JobScheduler:
 
         self.m_job_queue.put(
             {
+                "job_id": self.m_current_job["job_id"],
                 "job_type": JobTypes.CONNECT,
                 "job_data": job_data,
             }
@@ -286,6 +290,22 @@ class JobScheduler:
         elif operation_type == DatabaseOperationTypes.GET_CONTACTED_LEADS:
             leads = self.m_database_access.get_contacted_leads()
             return leads
+        elif operation_type == DatabaseOperationTypes.GET_SETUP:
+            setup_id = self.m_current_job["job_data"]["setup_id"]
+            setup = self.m_database_access.get_setup(setup_id)
+            return setup
+        elif operation_type == DatabaseOperationTypes.REMOVE_CONTACTED_LEADS:
+            leads = self.m_current_job["job_data"]["leads"]
+            self.m_database_access.remove_contacted_leads(leads)
+        elif operation_type == DatabaseOperationTypes.REMOVE_SETUP:
+            setup_id = self.m_current_job["job_data"]["setup_id"]
+            self.m_database_access.remove_setup(setup_id)
+        elif operation_type == DatabaseOperationTypes.UPDATE_CONTACTED_LEADS:
+            leads = self.m_current_job["job_data"]["leads"]
+            self.m_database_access.update_contacted_leads(leads)
+        elif operation_type == DatabaseOperationTypes.UPDATE_SETUP:
+            setup = self.m_current_job["job_data"]["setup"]
+            self.m_database_access.update_setup(setup)
 
     def _job_setting(self):
         job_schedule_interval = self.m_current_job["job_data"]["settings"][
@@ -350,13 +370,14 @@ class JobScheduler:
                             "recruiter": {
                                 "first_name": setup.get_recruiter_first_name(),
                                 "last_name": setup.get_recruiter_last_name(),
-                            }
+                            },
+                            "identity_id": setup.get_recruiter_identity_id(),
                         },
                     }
 
                     self.m_job_queue.put(
                         {
-                            "job_id": f"auto_schedule_{uuid.uuid4()}",
+                            "job_id": f"auto_schedule_{setup.get_recruiter_id()}_{uuid.uuid4()}",
                             "job_type": JobTypes.SCRAPE,
                             "job_data": job_data,
                         }
