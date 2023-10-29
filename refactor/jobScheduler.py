@@ -7,10 +7,10 @@ from typing import TypedDict, Unpack
 from requests.models import Response
 
 # importing the classes
-# ? filterer goes here
-# ? scraper goes here
+from app.controller.leadsFilterer import LeadsFilterer
+from app.controller.leadsScraper import LeadsScraper
 # ? url generator goes here
-# ? connector goes here
+from app.controller.leadsConnector import LeadsConnector
 
 from app.controller.databaseAdmin import DatabaseAdmin
 from app.schema.identitySchema import IdentitySchema
@@ -289,11 +289,32 @@ class JobScheduler:
             self.m_database_access.add_setup(setup)
         elif operation_type == DatabaseOperationTypes.GET_CONTACTED_LEADS:
             leads = self.m_database_access.get_contacted_leads()
-            return leads
+            leads_schema = []
+            for lead in leads:
+                leads_schema.append(
+                    LeadSchema(
+                        first_name=lead["first_name"],
+                        last_name=lead["last_name"],
+                        profile_id=lead["profile_id"],
+                    )
+                )
+            return leads_schema
+
         elif operation_type == DatabaseOperationTypes.GET_SETUP:
             setup_id = self.m_current_job["job_data"]["setup_id"]
             setup = self.m_database_access.get_setup(setup_id)
-            return setup
+            setup_schema = SetupSchema(
+                recruiter_id=setup["recruiter_id"],
+                recruiter_first_name=setup["recruiter_first_name"],
+                recruiter_last_name=setup["recruiter_last_name"],
+                recruiter_identity_id=setup["recruiter_identity_id"],
+                keywords=setup["keywords"],
+                candidates_per_page=setup["candidates_per_page"],
+                max_candidates=setup["max_candidates"],
+                base_message=setup["base_message"],
+            )
+            return setup_schema
+
         elif operation_type == DatabaseOperationTypes.REMOVE_CONTACTED_LEADS:
             leads = self.m_current_job["job_data"]["leads"]
             self.m_database_access.remove_contacted_leads(leads)
